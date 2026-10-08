@@ -1,0 +1,17 @@
+{
+  "source_type": "SYNTHETIC",
+  "org": "Ember & Oak Hospitality Group",
+  "actor": "R. Alder (fictional)",
+  "mission": "Morning bake: confirm sourdough batch ran to spec.",
+  "claimed_start": "2026-10-09T05:10:00.000Z",
+  "now": "2026-10-09T06:02:00.000Z",
+  "note": "52 minutes. Ran 40 loaves. Oven two was running a little cool so I added five minutes. Two loaves came out pale, set them aside. Finished the whole batch.",
+  "expected_model_output": {
+    "activity": "bake_batch",
+    "duration_minutes": 52,
+    "distance_miles": null,
+    "observations": ["oven two running cool, added five minutes"],
+    "exceptions": ["two loaves came out pale"],
+    "claimed_complete": true
+  }
+}
