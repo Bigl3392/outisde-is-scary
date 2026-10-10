@@ -122,10 +122,11 @@ $("copyMetrics").addEventListener("click", async () => {
 });
 
 // ---------- model ----------
-$("lowMemory").addEventListener("change", () => {
+$("lowMemory").addEventListener("change", async () => {
   if (loadedModelId() && $<HTMLInputElement>("lowMemory").checked !== loadedLowMemory()) {
     $("loadStatus").textContent = "Low-memory mode changed. Press Load model to apply it.";
   }
+  await renderMetrics();
 });
 
 $("load").addEventListener("click", async () => {
