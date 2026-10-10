@@ -178,6 +178,7 @@ async function runInterpretation(r: Receipt): Promise<Receipt> {
     return done;
   } catch (e) {
     await putMetric({ kind: "infer", at: new Date().toISOString(), model, receipt_id: r.receipt_id, ok: false, error: String(e) });
+    if (!loadedModelId()) $("loadStatus").textContent = "The GPU device was lost, so the model was unloaded. Press Load model, then Interpret with Gemma.";
     const failed = markSkipped(r, `inference error: ${String(e)}`);
     await putReceipt(failed);
     return failed;

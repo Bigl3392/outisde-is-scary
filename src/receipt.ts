@@ -1,4 +1,5 @@
 import { ExtractionSchema, type Extraction } from "./schema";
+import { extractJson } from "./prompt";
 
 /**
  * Deterministic receipt core. This module owns state, timestamps, and hashes.
@@ -197,7 +198,7 @@ export function applyInterpretation(
   let extraction: Extraction | null = null;
 
   try {
-    const parsed: unknown = JSON.parse(rawOutput);
+    const parsed: unknown = JSON.parse(extractJson(rawOutput));
     const result = ExtractionSchema.safeParse(parsed);
     if (result.success) extraction = result.data;
     else error = "schema: " + result.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ");

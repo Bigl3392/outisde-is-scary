@@ -1,5 +1,8 @@
 import { CreateWebWorkerMLCEngine, type MLCEngineInterface } from "@mlc-ai/web-llm";
-import { EXTRACTION_JSON_SCHEMA } from "./schema";
+import { buildPrompt, createSerializer, GENERATION, isGpuLost } from "./prompt";
+
+export { buildPrompt };
+const serialize = createSerializer();
 
 export const MODELS = [
   { id: "gemma3-1b-it-q4f16_1-MLC", label: "Gemma 3 1B (q4f16, ~0.7 GB) — primary" },
@@ -15,24 +18,26 @@ export interface InferenceResult {
 }
 
 let engine: MLCEngineInterface | null = null;
+let worker: Worker | null = null;
 let loadedModel: string | null = null;
 
 export function loadedModelId(): string | null {
   return loadedModel;
 }
 
-/** Instructions go in the user turn: Gemma templates do not reliably honor a system role. */
-export function buildPrompt(note: string): string {
-  return [
-    "Extract facts from a field note into JSON. Record only what the person said.",
-    "Do not judge whether it is true. Use null when a value is not stated.",
-    "Fields: activity (short snake_case label), duration_minutes, distance_miles,",
-    "observations (things noticed), exceptions (problems, skipped or unfinished items),",
-    "claimed_complete (true/false only if the person said so, else null).",
-    "",
-    "Note:",
-    note,
-  ].join("\n");
+/** Unload the current model, stop its worker and forget it, so the UI shows that a model must be loaded again. */
+export async function disposeEngine(): Promise<void> {
+  const e = engine;
+  const w = worker;
+  engine = null;
+  worker = null;
+  loadedModel = null;
+  try {
+    await e?.unload();
+  } catch {
+    /* the device may already be gone */
+  }
+  w?.terminate();
 }
 
 export async function loadModel(
@@ -40,22 +45,45 @@ export async function loadModel(
   onProgress: (text: string, fraction: number) => void,
 ): Promise<{ seconds: number }> {
   const t0 = performance.now();
-  const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
-  engine = await CreateWebWorkerMLCEngine(worker, modelId, {
-    initProgressCallback: (p) => onProgress(p.text, p.progress),
-  });
+  // Free the previous model first: each load otherwise leaves another copy on the GPU, and a phone GPU can lose its device.
+  await disposeEngine();
+  worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  engine = await CreateWebWorkerMLCEngine(
+    worker,
+    modelId,
+    { initProgressCallback: (p) => onProgress(p.text, p.progress) },
+    // web-llm's gemma3 record sets context_window_size 4096 while the model config keeps
+    // sliding_window_size 512; web-llm rejects both being positive. Keep the 4096 context.
+    modelId.startsWith("gemma3-") ? { sliding_window_size: -1 } : undefined,
+  );
   loadedModel = modelId;
   return { seconds: (performance.now() - t0) / 1000 };
 }
 
-export async function interpret(note: string): Promise<InferenceResult> {
+export function interpret(note: string): Promise<InferenceResult> {
+  return serialize(async () => {
+    try {
+      return await runInterpret(note);
+    } catch (e) {
+      if (isGpuLost(e)) {
+        await disposeEngine();
+        throw new Error(`GPU device lost; press Load model, then Interpret with Gemma. (${e instanceof Error ? e.message : String(e)})`);
+      }
+      throw e;
+    }
+  });
+}
+
+async function runInterpret(note: string): Promise<InferenceResult> {
   if (!engine || !loadedModel) throw new Error("Model not loaded.");
   const t0 = performance.now();
   const reply = await engine.chat.completions.create({
     messages: [{ role: "user", content: buildPrompt(note) }],
     temperature: 0,
-    max_tokens: 400,
-    response_format: { type: "json_object", schema: JSON.stringify(EXTRACTION_JSON_SCHEMA) },
+    max_tokens: GENERATION.max_tokens,
+    stop: [...GENERATION.stop],
+    // No grammar-constrained decoding: with it the model looped on whitespace after a closed array and the grammar compile
+    // costs seconds on a phone. Output is checked afterwards by extractJson and the zod schema, which keep the claim separate.
   });
   const elapsed_ms = performance.now() - t0;
   const raw = reply.choices[0]?.message?.content ?? "";
