@@ -9,7 +9,8 @@ import {
   type CheckInDraft,
   type Receipt,
 } from "./receipt";
-import { MODELS, loadModel, interpret, loadedModelId } from "./llm";
+import { MODELS, loadModel, interpret, loadedModelId, loadedLowMemory } from "./llm";
+import { metricsDocument } from "./engine-options";
 import { putReceipt, allReceipts, putMetric, allMetrics } from "./store";
 
 const DEFAULT_NOTE =
@@ -25,6 +26,8 @@ app.innerHTML = `
   <section>
     <h2>Model</h2>
     <select id="model">${MODELS.map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}</select>
+    <label class="check"><input id="lowMemory" type="checkbox" /> Low-memory mode</label>
+    <p class="note">When checked, the next load uses a 1024-token context window. Load the model again after changing this.</p>
     <button id="load" class="primary">Load model</button>
     <progress id="prog" value="0" max="1" hidden></progress>
     <p class="note" id="loadStatus">Not loaded. First load downloads weights over the network, then they are cached on this device.</p>
@@ -105,7 +108,8 @@ async function deviceCheck() {
 // ---------- metrics ----------
 async function renderMetrics() {
   const m = await allMetrics();
-  $("metrics").textContent = JSON.stringify({ device: deviceInfo, runs: m }, null, 2);
+  const lowMemory = $<HTMLInputElement>("lowMemory").checked;
+  $("metrics").textContent = JSON.stringify(metricsDocument(deviceInfo, m, lowMemory), null, 2);
 }
 
 $("copyMetrics").addEventListener("click", async () => {
@@ -118,8 +122,15 @@ $("copyMetrics").addEventListener("click", async () => {
 });
 
 // ---------- model ----------
+$("lowMemory").addEventListener("change", () => {
+  if (loadedModelId() && $<HTMLInputElement>("lowMemory").checked !== loadedLowMemory()) {
+    $("loadStatus").textContent = "Low-memory mode changed. Press Load model to apply it.";
+  }
+});
+
 $("load").addEventListener("click", async () => {
   const id = $<HTMLSelectElement>("model").value;
+  const lowMemory = $<HTMLInputElement>("lowMemory").checked;
   const btn = $<HTMLButtonElement>("load");
   const prog = $<HTMLProgressElement>("prog");
   btn.disabled = true;
@@ -133,12 +144,13 @@ $("load").addEventListener("click", async () => {
     const { seconds } = await loadModel(id, (text, frac) => {
       prog.value = frac;
       $("loadStatus").textContent = `${text} (${Math.round((performance.now() - t0) / 1000)}s)`;
-    });
-    $("loadStatus").textContent = `Loaded ${id} in ${seconds.toFixed(1)}s.`;
-    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, load_seconds: Number(seconds.toFixed(2)), ok: true });
+    }, lowMemory);
+    const mode = lowMemory ? " (low-memory mode, 1024-token context)" : "";
+    $("loadStatus").textContent = `Loaded ${id} in ${seconds.toFixed(1)}s${mode}.`;
+    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, load_seconds: Number(seconds.toFixed(2)), ok: true });
   } catch (e) {
     $("loadStatus").textContent = `Load failed: ${String(e)}`;
-    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, ok: false, error: String(e) });
+    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, ok: false, error: String(e) });
   } finally {
     clearInterval(tick);
     btn.disabled = false;
@@ -160,6 +172,7 @@ async function runInterpretation(r: Receipt): Promise<Receipt> {
     return skipped;
   }
   const model = loadedModelId()!;
+  const lowMemory = loadedLowMemory();
   try {
     const res = await interpret(note);
     // Persist raw timing BEFORE judging the output.
@@ -167,6 +180,7 @@ async function runInterpretation(r: Receipt): Promise<Receipt> {
       kind: "infer",
       at: new Date().toISOString(),
       model,
+      low_memory: lowMemory,
       receipt_id: r.receipt_id,
       elapsed_ms: Math.round(res.elapsed_ms),
       completion_tokens: res.completion_tokens,
@@ -177,7 +191,8 @@ async function runInterpretation(r: Receipt): Promise<Receipt> {
     await putReceipt(done);
     return done;
   } catch (e) {
-    await putMetric({ kind: "infer", at: new Date().toISOString(), model, receipt_id: r.receipt_id, ok: false, error: String(e) });
+    await putMetric({ kind: "infer", at: new Date().toISOString(), model, low_memory: lowMemory, receipt_id: r.receipt_id, ok: false, error: String(e) });
+    if (!loadedModelId()) $("loadStatus").textContent = "The GPU device was lost, so the model was unloaded. Press Load model, then Interpret with Gemma.";
     const failed = markSkipped(r, `inference error: ${String(e)}`);
     await putReceipt(failed);
     return failed;

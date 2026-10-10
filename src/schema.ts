@@ -16,15 +16,19 @@ export const ExtractionSchema = z.object({
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
 
-/** Hand-written JSON Schema handed to the model's constrained decoder. */
+/**
+ * Hand-written JSON Schema handed to the model's constrained decoder. The bounds are at or below ExtractionSchema above (arrays 6 here, 10 there):
+ * without maxItems the decoder allows an unbounded array, and a 1B model at temperature 0 can loop on "null"
+ * until max_tokens, which truncates the JSON (seen on the phone, 2026-10-09).
+ */
 export const EXTRACTION_JSON_SCHEMA = {
   type: "object",
   properties: {
-    activity: { type: "string" },
+    activity: { type: "string", maxLength: 80 },
     duration_minutes: { type: ["number", "null"] },
     distance_miles: { type: ["number", "null"] },
-    observations: { type: "array", items: { type: "string" } },
-    exceptions: { type: "array", items: { type: "string" } },
+    observations: { type: "array", maxItems: 6, items: { type: "string", maxLength: 200 } },
+    exceptions: { type: "array", maxItems: 6, items: { type: "string", maxLength: 200 } },
     claimed_complete: { type: ["boolean", "null"] },
   },
   required: [
