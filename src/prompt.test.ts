@@ -1,24 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { buildPrompt, createSerializer, GENERATION, isGpuLost, extractJson } from "./prompt";
 import { ExtractionSchema } from "./schema";
+import { looksLikeLines, parseLines } from "./lines";
 import { applyInterpretation, startCheckIn, submitReturn } from "./receipt";
 
 describe("FR-AI-001 prompt", () => {
-  it("carries the note verbatim and ends by asking for JSON", () => {
+  it("carries the note verbatim and ends by starting the answer", () => {
     const p = buildPrompt("46 minutes. About 3 miles.");
-    expect(p).toContain("Note: 46 minutes. About 3 miles.\nJSON:");
-    expect(p.endsWith("JSON:")).toBe(true);
+    expect(p).toContain("Note: 46 minutes. About 3 miles.\nactivity:");
+    expect(p.endsWith("activity:")).toBe(true);
   });
-  it("does not describe the fields in words the model echoes into the output", () => {
+  it("its worked example is itself a valid extraction in the line format", () => {
     const p = buildPrompt("x");
-    expect(p).not.toContain("problems, skipped or unfinished items");
-  });
-  it("its worked example is itself a valid extraction", () => {
-    const lines = buildPrompt("x")
-      .split("\n")
-      .filter((l) => l.startsWith("JSON: {"));
-    expect(lines).toHaveLength(1);
-    expect(ExtractionSchema.safeParse(JSON.parse(lines[0].slice(6))).success).toBe(true);
+    const example = p.slice(p.indexOf("activity: run"), p.indexOf("\n\nNote: x"));
+    expect(looksLikeLines(example)).toBe(true);
+    expect(ExtractionSchema.safeParse(parseLines(example)).success).toBe(true);
   });
   it("stays short: prompt length costs time on a phone", () => {
     expect(buildPrompt("46 minutes. About 3 miles.").length).toBeLessThan(700);
@@ -27,7 +23,7 @@ describe("FR-AI-001 prompt", () => {
 
 describe("FR-AI-002 generation limits", () => {
   it("stops on blank-line runs and caps tokens well below the old 400", () => {
-    expect(GENERATION.max_tokens).toBeLessThanOrEqual(200);
+    expect(GENERATION.max_tokens).toBeLessThanOrEqual(120);
     expect(GENERATION.stop).toContain("\n\n");
   });
 });
