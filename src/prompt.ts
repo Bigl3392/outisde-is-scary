@@ -3,30 +3,28 @@
  * Instructions go in the user turn: Gemma templates do not reliably honor a system role.
  */
 
-// One short worked example: prompt length costs time on a phone (prefill runs at roughly 20 tokens per second there).
-const EXAMPLE = {
-  note: "Ran 30 minutes, about 2 miles. Skipped the last hill.",
-  json: {
-    activity: "run",
-    duration_minutes: 30,
-    distance_miles: 2,
-    observations: [],
-    exceptions: ["Skipped the last hill"],
-    claimed_complete: null,
-  },
-};
+// One short worked example in a flat "key: value" format (see lines.ts). Prompt length costs time on a phone
+// (prefill runs at roughly 20 tokens per second there), so there is one example and no field essay.
+const EXAMPLE_NOTE = "Ran 30 minutes, about 2 miles. Skipped the last hill.";
+const EXAMPLE_ANSWER = [
+  "activity: run",
+  "minutes: 30",
+  "miles: 2",
+  "noticed: none",
+  "problems: skipped the last hill",
+  "complete: none",
+].join("\n");
 
 export function buildPrompt(note: string): string {
   return [
-    "Turn a field note into one line of JSON with these keys: activity, duration_minutes, distance_miles, observations, exceptions, claimed_complete.",
-    "Record only what the person said. Use null for a number not stated, [] for nothing to list, and null for claimed_complete unless the person said so.",
-    "Write only the JSON.",
+    "Read a field note and answer with exactly these six lines and nothing else: activity, minutes, miles, noticed, problems, complete.",
+    "Write only what the person said. Write none when something is not stated. Separate several items with a semicolon. complete is yes, no or none.",
     "",
-    `Note: ${EXAMPLE.note}`,
-    `JSON: ${JSON.stringify(EXAMPLE.json)}`,
+    `Note: ${EXAMPLE_NOTE}`,
+    EXAMPLE_ANSWER,
     "",
     `Note: ${note}`,
-    "JSON:",
+    "activity:",
   ].join("\n");
 }
 
@@ -40,9 +38,9 @@ export function createSerializer() {
   };
 }
 
-/** Generation limits for the extraction call. Valid output is one line of about 40 to 100 tokens. */
+/** Generation limits for the extraction call. A valid answer is six short lines, about 30 to 60 tokens. */
 export const GENERATION = {
-  max_tokens: 160,
+  max_tokens: 100,
   /** Valid output has no blank lines; a run of whitespace is the degenerate loop seen on the phone. */
   stop: ["\n\n", "\n \n", "\n  \n"],
 } as const;
