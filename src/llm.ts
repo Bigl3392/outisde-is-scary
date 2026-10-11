@@ -1,5 +1,6 @@
 import { CreateWebWorkerMLCEngine, prebuiltAppConfig, type MLCEngineInterface } from "@mlc-ai/web-llm";
 import { buildPrompt, createSerializer, GENERATION, isGpuLost } from "./prompt";
+import { withActivityKey } from "./lines";
 import { chatOptionsForLoad, gemma3NoF16Model } from "./engine-options";
 
 export { buildPrompt };
@@ -97,8 +98,8 @@ async function runInterpret(note: string): Promise<InferenceResult> {
     // costs seconds on a phone. Output is checked afterwards by extractJson and the zod schema, which keep the claim separate.
   });
   const elapsed_ms = performance.now() - t0;
-  // The prompt ends with "activity:" to start the answer, so the reply continues from there; put the key back for parsing and storage.
-  const raw = "activity:" + (reply.choices[0]?.message?.content ?? "");
+  // The prompt ends with "activity:" to start the answer, so the reply continues from there; put the key back for parsing and storage unless the reply already has it.
+  const raw = withActivityKey(reply.choices[0]?.message?.content ?? "");
   const completion_tokens = reply.usage?.completion_tokens ?? null;
   const extra = (reply.usage as { extra?: { decode_tokens_per_s?: number } } | undefined)?.extra;
   const tokens_per_s =
