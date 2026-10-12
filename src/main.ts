@@ -11,6 +11,8 @@ import {
 } from "./receipt";
 import { MODELS, loadModel, interpret, loadedModelId, loadedLowMemory } from "./llm";
 import { metricsDocument } from "./engine-options";
+import { BUILD_ID } from "./build-id";
+import { listenForDeviceLoss } from "./gpu-loss";
 import { putReceipt, allReceipts, putMetric, allMetrics } from "./store";
 
 const DEFAULT_NOTE =
@@ -106,6 +108,11 @@ async function deviceCheck() {
 }
 
 // ---------- metrics ----------
+// WebLLM does not say why the GPU device was lost; the worker reports it and it is recorded next to the run.
+listenForDeviceLoss((info) => {
+  void putMetric({ kind: "gpu_lost", at: info.at, build_id: BUILD_ID, reason: info.reason, message: info.message }).then(() => renderMetrics());
+});
+
 async function renderMetrics() {
   const m = await allMetrics();
   const lowMemory = $<HTMLInputElement>("lowMemory").checked;
@@ -148,10 +155,10 @@ $("load").addEventListener("click", async () => {
     }, lowMemory);
     const mode = lowMemory ? " (low-memory mode, 1024-token context)" : "";
     $("loadStatus").textContent = `Loaded ${id} in ${seconds.toFixed(1)}s${mode}.`;
-    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, load_seconds: Number(seconds.toFixed(2)), ok: true });
+    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, build_id: BUILD_ID, load_seconds: Number(seconds.toFixed(2)), ok: true });
   } catch (e) {
     $("loadStatus").textContent = `Load failed: ${String(e)}`;
-    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, ok: false, error: String(e) });
+    await putMetric({ kind: "load", at: new Date().toISOString(), model: id, low_memory: lowMemory, build_id: BUILD_ID, ok: false, error: String(e) });
   } finally {
     clearInterval(tick);
     btn.disabled = false;
@@ -186,13 +193,15 @@ async function runInterpretation(r: Receipt): Promise<Receipt> {
       elapsed_ms: Math.round(res.elapsed_ms),
       completion_tokens: res.completion_tokens,
       tokens_per_s: res.tokens_per_s ? Number(res.tokens_per_s.toFixed(1)) : null,
+      finish_reason: res.finish_reason,
+      build_id: BUILD_ID,
       raw_output: res.raw,
     });
     const done = applyInterpretation(r, res.raw, model, new Date());
     await putReceipt(done);
     return done;
   } catch (e) {
-    await putMetric({ kind: "infer", at: new Date().toISOString(), model, low_memory: lowMemory, receipt_id: r.receipt_id, ok: false, error: String(e) });
+    await putMetric({ kind: "infer", at: new Date().toISOString(), model, low_memory: lowMemory, build_id: BUILD_ID, receipt_id: r.receipt_id, ok: false, error: String(e) });
     if (!loadedModelId()) $("loadStatus").textContent = "The GPU device was lost, so the model was unloaded. Press Load model, then Interpret with Gemma.";
     const failed = markSkipped(r, `inference error: ${String(e)}`);
     await putReceipt(failed);

@@ -16,15 +16,19 @@ const EXAMPLE_ANSWER = [
 ].join("\n");
 
 export function buildPrompt(note: string): string {
+  // The prompt ends with the new note and "Answer:". It does not pre-write "activity:" for the model to continue:
+  // that text sat inside the user turn, not in the reply, and the model answered with a bare value. The model now
+  // writes all six lines itself, starting with "activity:", and the strict parser rejects anything else.
   return [
-    "Read a field note and answer with exactly these six lines and nothing else: activity, minutes, miles, noticed, problems, complete.",
+    "Read a field note and answer with exactly these six lines and nothing else: activity, minutes, miles, noticed, problems, complete. Start with the line that begins activity:",
     "Write only what the person said. Write none when something is not stated. Separate several items with a semicolon. complete is yes, no or none.",
     "",
     `Note: ${EXAMPLE_NOTE}`,
+    "Answer:",
     EXAMPLE_ANSWER,
     "",
     `Note: ${note}`,
-    "activity:",
+    "Answer:",
   ].join("\n");
 }
 
@@ -41,8 +45,11 @@ export function createSerializer() {
 /** Generation limits for the extraction call. A valid answer is six short lines, about 30 to 60 tokens. */
 export const GENERATION = {
   max_tokens: 100,
-  /** Valid output has no blank lines; a run of whitespace is the degenerate loop seen on the phone. */
-  stop: ["\n\n", "\n \n", "\n  \n"],
+  /**
+   * Only a run of two blank lines stops generation. A single blank line must not cut a valid answer short before all
+   * six fields arrive; the token cap bounds the whitespace loop seen on the phone.
+   */
+  stop: ["\n\n\n"],
 } as const;
 
 /** True for the WebGPU failures that mean the GPU device is gone and the engine must be rebuilt. */
