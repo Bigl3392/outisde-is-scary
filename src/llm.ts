@@ -1,6 +1,5 @@
 import { CreateWebWorkerMLCEngine, prebuiltAppConfig, type MLCEngineInterface } from "@mlc-ai/web-llm";
 import { buildPrompt, createSerializer, GENERATION, isGpuLost } from "./prompt";
-import { withActivityKey } from "./lines";
 import { chatOptionsForLoad, gemma3NoF16Model } from "./engine-options";
 
 export { buildPrompt };
@@ -16,7 +15,10 @@ const noF16 = gemma3NoF16Model(prebuiltAppConfig.model_list);
 export const MODELS = noF16 ? [...BASE_MODELS, noF16] : BASE_MODELS;
 
 export interface InferenceResult {
+  /** The model's reply exactly as returned, with nothing added or removed. */
   raw: string;
+  /** Why generation ended: "stop" (stop sequence or end of turn), "length" (token cap), or null if not reported. */
+  finish_reason: string | null;
   elapsed_ms: number;
   completion_tokens: number | null;
   tokens_per_s: number | null;
@@ -36,8 +38,13 @@ export function loadedLowMemory(): boolean {
   return lowMemoryLoaded;
 }
 
-/** Unload the current model, stop its worker and forget it, so the UI shows that a model must be loaded again. */
-export async function disposeEngine(): Promise<void> {
+/** Unload the current model, stop its worker and forget it, so the UI shows that a model must be loaded again. Queued behind any running load or generation. */
+export function disposeEngine(): Promise<void> {
+  return serialize(disposeNow);
+}
+
+/** Dispose without queueing. Only for code already running inside the queue. */
+async function disposeNow(): Promise<void> {
   const e = engine;
   const w = worker;
   engine = null;
@@ -52,14 +59,23 @@ export async function disposeEngine(): Promise<void> {
   w?.terminate();
 }
 
-export async function loadModel(
+/** Loading shares one queue with generation and unloading, so a load can never unload the GPU engine mid-generation. */
+export function loadModel(
   modelId: string,
   onProgress: (text: string, fraction: number) => void,
   lowMemory = false,
 ): Promise<{ seconds: number }> {
+  return serialize(() => loadNow(modelId, onProgress, lowMemory));
+}
+
+async function loadNow(
+  modelId: string,
+  onProgress: (text: string, fraction: number) => void,
+  lowMemory: boolean,
+): Promise<{ seconds: number }> {
   const t0 = performance.now();
   // Free the previous model first: each load otherwise leaves another copy on the GPU, and a phone GPU can lose its device.
-  await disposeEngine();
+  await disposeNow();
   worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   engine = await CreateWebWorkerMLCEngine(
     worker,
@@ -78,7 +94,7 @@ export function interpret(note: string): Promise<InferenceResult> {
       return await runInterpret(note);
     } catch (e) {
       if (isGpuLost(e)) {
-        await disposeEngine();
+        await disposeNow();
         throw new Error(`GPU device lost; press Load model, then Interpret with Gemma. (${e instanceof Error ? e.message : String(e)})`);
       }
       throw e;
@@ -98,11 +114,12 @@ async function runInterpret(note: string): Promise<InferenceResult> {
     // costs seconds on a phone. Output is checked afterwards by extractJson and the zod schema, which keep the claim separate.
   });
   const elapsed_ms = performance.now() - t0;
-  // The prompt ends with "activity:" to start the answer, so the reply continues from there; put the key back for parsing and storage unless the reply already has it.
-  const raw = withActivityKey(reply.choices[0]?.message?.content ?? "");
+  // Keep the reply untouched. The model is asked to write all six lines itself; the strict parser decides if it did.
+  const raw = reply.choices[0]?.message?.content ?? "";
+  const finish_reason = reply.choices[0]?.finish_reason ?? null;
   const completion_tokens = reply.usage?.completion_tokens ?? null;
   const extra = (reply.usage as { extra?: { decode_tokens_per_s?: number } } | undefined)?.extra;
   const tokens_per_s =
     extra?.decode_tokens_per_s ?? (completion_tokens ? completion_tokens / (elapsed_ms / 1000) : null);
-  return { raw, elapsed_ms, completion_tokens, tokens_per_s };
+  return { raw, finish_reason, elapsed_ms, completion_tokens, tokens_per_s };
 }

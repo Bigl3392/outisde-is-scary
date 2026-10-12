@@ -42,7 +42,7 @@ Models (via [WebLLM](https://github.com/mlc-ai/web-llm)): Gemma 3 1B primary; Ge
 ## Honest limits
 
 - **Offline is conditional.** The first load downloads model weights over the network. After they are cached on the device, extraction runs without a connection. Browsers can evict caches; the app asks for persistent storage but cannot guarantee it.
-- **Small model, constrained output.** Extraction uses JSON-schema-constrained decoding plus schema validation. A 1B model can still misread a note; that is why a person confirms the receipt and why the raw note is always kept.
+- **Small model, constrained output.** The model is asked for six plain `key: value` lines (no grammar-constrained decoding), and a strict parser plus schema validation checks them; anything unreadable fails the interpretation and the claim is kept. A 1B model can still misread a note; that is why a person confirms the receipt and why the raw note is always kept.
 - **Self-attestation is not proof.** This build does not fabricate certainty. Photo, sensor, or second-person corroboration are out of scope here.
 - Voice input is not in this version.
 

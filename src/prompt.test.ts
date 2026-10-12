@@ -5,10 +5,11 @@ import { looksLikeLines, parseLines } from "./lines";
 import { applyInterpretation, startCheckIn, submitReturn } from "./receipt";
 
 describe("FR-AI-001 prompt", () => {
-  it("carries the note verbatim and ends by starting the answer", () => {
+  it("carries the note verbatim and does not pre-write the first answer key for the model to continue", () => {
     const p = buildPrompt("46 minutes. About 3 miles.");
-    expect(p).toContain("Note: 46 minutes. About 3 miles.\nactivity:");
-    expect(p.endsWith("activity:")).toBe(true);
+    expect(p).toContain("Note: 46 minutes. About 3 miles.\nAnswer:");
+    expect(p.endsWith("Answer:")).toBe(true);
+    expect(p.endsWith("activity:")).toBe(false);
   });
   it("its worked example is itself a valid extraction in the line format", () => {
     const p = buildPrompt("x");
@@ -22,9 +23,10 @@ describe("FR-AI-001 prompt", () => {
 });
 
 describe("FR-AI-002 generation limits", () => {
-  it("stops on blank-line runs and caps tokens well below the old 400", () => {
+  it("caps tokens well below the old 400 and never stops on a single blank line", () => {
     expect(GENERATION.max_tokens).toBeLessThanOrEqual(120);
-    expect(GENERATION.stop).toContain("\n\n");
+    expect(GENERATION.stop).not.toContain("\n\n");
+    expect(GENERATION.stop).toContain("\n\n\n");
   });
 });
 
